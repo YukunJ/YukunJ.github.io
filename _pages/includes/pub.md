@@ -6,7 +6,7 @@
 [EnvPool: A Highly Parallel Reinforcement Learning Environment Execution Engine](https://proceedings.neurips.cc/paper_files/paper/2022/file/8caaf08e49ddbad6694fae067442ee21-Paper-Datasets_and_Benchmarks.pdf) \\
 Jiayi Weng, Min Lin, Shengyi Huang, Bo Liu, Denys Makoviichuk, Viktor Makoviychuk, Zichen Liu, Yufan Song, Ting Luo, **Yukun Jiang**, Zhongwen Xu, Shuicheng Yan
 
-[**Project**](https://envpool.readthedocs.io/en/latest/) <strong><span class='show_paper_citations' data='CQrkQbIAAAAJ:Y0pCki6q_DkC'></span></strong>
+[**Project**](https://envpool.readthedocs.io/en/latest/) <strong><span class='show_paper_citations' data='uIWRGioAAAAJ:u-x6o8ySG0sC'></span></strong>
 
 - EnvPool is a C++-based batched reinforcement-learning environment pool with pybind11 interface
 - Support both synchronous execution and asynchronous execution
