@@ -61,3 +61,36 @@ The far jump instruction sets the code segment `cs` to be `0x9000`. The rest 5 l
 + **stack**: `ss:sp`
 
 Recall so far only the first 512 bytes of the Linux code is loaded from disk into memory, the rest also needs to be loaded.
+
+```assembly
+load_setup:
+  mov dx, 0x0000    # drive 0, head 0
+  mov cx, 0x0002    # sector 2,	cylinder 0
+  mov bx, 0x0200    # offset address is 512, in es(0x9000)
+  mov ax, 0x0200+4  # service 2 (BIOS read_sector function), read 4 sectors
+  int 0x13          # interrupt
+  jnc ok_load_setup
+```
+
+Here it prepares the arguments in `dx`, `cx`, `bx` and `ax` and call the interrupt `0x13`, which results in disk reading of **4** sectors (512 bytes each) and place them at `0x90200`. 
+
+Assuming the disk reading is successful, it jumps to the label `ok_load_setup`. The key operations there are
+
+```assembly
+ok_load_setup:
+  ...
+  mov ax, 0x1000
+  mov es, ax
+  call read_it
+  ...
+  jmpi  0, 0x9020
+```
+
+It will load the rest of the 256 sectors Linux operating system code (called `system` starting from the 6th sector) at `0x10000`. Then it jumps to `0x90200` which is the **2nd** sector containing the `setup` and start executing from there.
+
+So far all the Linux operating system codes have been loaded from disk into memory with the following structures:
++ `bootsect`: **1** sector beginning at `0x90000`
++ `setup`: **4** sectors beginning at `0x90200`
++ `system`: **256** sectors beginning at `0x10000`
+
+
