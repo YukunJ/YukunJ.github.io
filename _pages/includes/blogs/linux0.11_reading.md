@@ -7,6 +7,9 @@ author_profile: false
 
 # Linux Source Reading
 
+Table of Contents
++ [Booting](#booting)
+
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
 ## Booting
@@ -42,7 +45,7 @@ So this part of assembly actually means copying the first `512` bytes of `bootse
 And then it's followed by far jump instruction to the new location of the same `bootsect.s` binary starting with offset at the `go` label.
 
 ```assembly
-jmpi go,0x9000 # jump to the new location of the same code
+jmpi go,0x9000 # pseudo code: cs = 0x9000; ip = go;
 go:
   mov ax, cs
   mov ds, ax
@@ -50,3 +53,11 @@ go:
   mov ss, ax
   mov sp, 0xff00
 ```
+
+The far jump instruction sets the code segment `cs` to be `0x9000`. The rest 5 lines in `go` label set the data segment `ds` and stack segment `ss` to be `0x9000`, and stack pointer `sp` to be offset `0xff00`. The current stack location `ss:sp` is `(ss << 4) | sp = 0x9ff00`. On a high level, Linux is doing preparing work here to get ready to access
+
++ **code**:  `cs:ip`
++ **data**:  `ds:[address]`
++ **stack**: `ss:sp`
+
+Recall so far only the first 512 bytes of the Linux code is loaded from disk into memory, the rest also needs to be loaded.
