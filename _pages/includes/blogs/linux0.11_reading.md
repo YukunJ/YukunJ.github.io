@@ -120,3 +120,32 @@ end_move:
 The routine here accomplishes two things:
 + temporarily disable interrupt because it will switch modes and re-setup the interrupt table
 + move the Linux `system` binary from [0x10000, 0x90000] to [0x00000, 0x80000]
+
+Linux then needs to switch from 16-bit real mode to 32-bit protected mode for historical reasons that we will skim over. Recall so far when we calculate the address, it is `segment address << 4 | offset`. The OS will now set up the `idt` (Interrupte descriptor table) and `gdt` (global descriptor table) to prepare the mode switch, after which the memory calculation process will be: the segment register stores an index into the `gdt` which allows it to find the segment address. And then plus the offset it will get the final memory address.
+
+```assembly
+lidt idt_48          # load idt with 0,0
+lgdt gdt_48          # load gdt with appropriate
+
+gdt_48:
+  .word 0x800        # gdt limit=2048, 256 GDT entries  
+  .word 512+gdt, 0x9 # 0x90200 + gdt is its real address in setup.s
+```
+
+It also needs to enable the **A20** (Address Line 20 Gate) so that it could start to use the 21st bit of the memory address and beyond 1 MB.
+
+```assembly
+inb  al, 0x92          # read current value from port 0x92 (System Control Port A)
+orb  al, 0b00000010    # set A20 Gate Enable bit
+outb 0x92, al          # write back to port 0x92
+```
+
+Now it's ready to switch the mode.
+
+```assembly
+mov ax, 0x0001  # protected mode (PE) bit
+lmsw ax         # load the value into CR0 register (Machine Status Word)
+jmpi 0, 8       # jump to segment 8 of offset 0
+```
+
+It load the PE bit into the register and jump to segment **8** and offset 0. Recall it has setup the `gdt`. Segment 8 corresponds to index **1** code segment which has base address **0**. Hence essentially this `jmpi` jumps to address `0x0` which is the beginning of `system` code. We will start to look at `head.s` now as the very beginning of `system` binary.
