@@ -93,4 +93,30 @@ So far all the Linux operating system codes have been loaded from disk into memo
 + `setup`: **4** sectors beginning at `0x90200`
 + `system`: **256** sectors beginning at `0x10000`
 
+Now the booting process is done with `bootsect` and with the `jmpi  0, 0x9020` the workflow starts into `setup`. The beginning part of it continues to call BIOS interrupts to populate `0x90000` to `0x901FF` with some miscellaneous parameters like cursor, memory size, video card data, etc. Notice some part of the `bootsect` code is overwritten by these.
 
+Then it's followed by another chunk of memory copying:
+
+```assembly
+  ...
+  cli              # disable interrupts
+  mov ax, 0x0000
+  cld              # set move direction to be forward
+do_move:
+  mov es, ax       # set destination segment
+  add ax, 0x1000
+  cmp ax, 0x9000
+  jz  end_move
+  mov ds, ax       # set source segment
+  sub di, di
+  sub si, si
+  mov cx, 0x8000   # will move a 2-byte word 32768 times = 64 KB
+  rep movsw        # copy ds:si to es:di
+  jmp do_move
+end_move:
+  ...
+```
+
+The routine here accomplishes two things:
++ temporarily disable interrupt because it will switch modes and re-setup the interrupt table
++ move the Linux `system` binary from [0x10000, 0x90000] to [0x00000, 0x80000]
