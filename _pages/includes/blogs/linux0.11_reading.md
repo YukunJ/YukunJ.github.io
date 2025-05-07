@@ -149,3 +149,40 @@ jmpi 0, 8       # jump to segment 8 of offset 0
 ```
 
 It load the PE bit into the register and jump to segment **8** and offset 0. Recall it has setup the `gdt`. Segment 8 corresponds to index **1** code segment which has base address **0**. Hence essentially this `jmpi` jumps to address `0x0` which is the beginning of `system` code. We will start to look at `head.s` now as the very beginning of `system` binary.
+
+The first part of `head.s` sets up the kernel stack. 
+
+```assembly
+_pg_dir:
+_startup_32:
+  mov eax, 0x10
+  mov  ds, ax
+  mov  es, ax
+  mov  fs, ax
+  mov  gs, ax
+  lss esp, _stack_start
+```
+
+Notice the label `_pg_dir` is where the page directory will be placed later when Linux starts paging. So the code here will actually be overwritten later as well.
+
+It points the 4 segment register `ds`, `es`, `fs` and `gs` to `0x10`, the 2nd index into the `gdt`, namely the data segment descriptor.
+
+For this `_stack_start`, we need reference into `sched.c`.
+
+```c
+long user_stack[4096 >> 2];
+
+struct {
+  long *a;
+  short b;
+} stack_start = {&user_stack[4096 >> 2], 0x10};
+```
+
+So `lss esp, _stack_start` sets `ss` (stack segment register) to the same data segment and `esp` to be the address of the last element of `user_stack`. So it means the kernel stack is **4kb** and the stack pointer points to the top of it and will grow downward.
+
+```assembly
+call setup_idt # set up 256 descriptor to point to a function 'ignore_int'
+call setup_gdt # same as before
+```
+
+It then re-setup the `idt` and `gdt`. In particular, the `idt` is setup to have **256** entries all point to a dummy `ignore_int` function that does nothing. Later on each module could overwrite it and provide the handler function for some interrupt descriptor they care about. 
