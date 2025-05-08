@@ -9,6 +9,7 @@ author_profile: false
 
 Table of Contents
 + [Booting](#booting)
++ [Initialization](#initialization)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -186,3 +187,53 @@ call setup_gdt # same as before
 ```
 
 It then re-setup the `idt` and `gdt`. In particular, the `idt` is setup to have **256** entries all point to a dummy `ignore_int` function that does nothing. Later on each module could overwrite it and provide the handler function for some interrupt descriptor they care about. 
+
+Here comes the last piece before it jumps into the `main` C function and says goodbye to assembly. It needs to enable the paging mechanism.
+
+```assembly
+jmp after_page_tables
+...
+after_page_tables:
+  push 0
+  push 0
+  push 0
+  push L6
+  push _main
+  jmp setup_paging
+```
+
+One thing to notice here is that it pushes the address of `main` function as the return address for the call to `setup_paging`. Therefore when it finishes, the control flow will return jump into `main`.
+
+A few words about memory paging: operating system provides each running process the illusion that it has the whole address space. But in reality each process work with virtual memory address. There is a small hardware device called **MMU** (Memory management unit) on CPU board that does the virtual to physical memory address translation. In the software part, Linux just needs to set up the page table for MMU to work on.
+
+Linux 0.11 mandates the maximum memory is 16 MB, aka the biggest address is `0xFFFFFF`. Each page is 4KB. It uses a 2-level paging here. The page directory will contain 4 page tables. Each page table corresponds to 1024 pages. 
+
+Hence `4 * 1024 * 4KB = 16 MB` will be enough to represent the address space.
+
+With all the knowledge in mind, let's look at the final piece of assembly that enables paging mechanism:
+
+```assembly
+setup_paging:
+  mov ecx, 1024*5      # set counter to be number of 4-byte entries in 5 pages (1 directory + 4 tables)
+  xor eax, eax
+  xor edi, edi         # pg_dir is 0x000
+  pushf
+  cld
+  rep stosd            # repeat 1024*5 times to store value 0 in eax into edi, basically zeroes out the 5 pages
+  mov eax, _pg_dir
+  mov [eax], pg0+7     # link page into page directory, 7 = 0b111 set up the present, writer and supervisor bits
+  mov [eax+4], pg1+7
+  mov [eax+8], pg2+7
+  mov [eax+12], pg3+7
+  mov edi, pg3+4096    # edi being the last dword in the last page table
+  mov eax, 00fff007h   # eax being the last 4KB page in the first 16MB plus 7
+  std
+  ...                  # fill the page backwards with identity mapping
+  or eax, 80000000h    # setup the 31st PG (Paging Enable) bit
+  mov cr0, eax         # enable paging
+  ret
+```
+
+Now let's go to `main.c`.
+
+## Initialization
