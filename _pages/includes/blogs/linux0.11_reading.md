@@ -237,3 +237,44 @@ setup_paging:
 Now let's go to `main.c`.
 
 ## Initialization
+
+Let's take a look overall on what does the `main` function of Linux operating system do.
+
+```c
+void main(void) {
+  /* Part A */
+  ROOT_DEV = ORIG_ROOT_DEV;
+  drive_info = DRIVE_INFO;
+  memory_end = (1<<20) + (EXT_MEM_K<<10);
+  memory_end &= 0xfffff000;
+  if (memory_end > 16*1024*1024)
+    memory_end = 16*1024*1024;
+  if (memory_end > 12*1024*1024)
+    buffer_memory_end = 4*1024*1024;
+  else if (memory_end > 6*1024*1024)
+    buffer_memory_end = 2*1024*124;
+  else
+    buffer_memory_end = 1*1024*1024;
+  main_memory_state = buffer_memory_end;
+  /* Part B */
+  mem_init(main_memory_start, memory_end);
+  trap_init();
+  blk_dev_init();
+  chr_dev_init();
+  tty_init();
+  time_init();
+  sched_init();
+  buffer_init(buffer_memory_end);
+  hd_init();
+  floppy_init();
+  /* Part C */
+  sti();
+  move_to_user_mode();
+  if (!fork()) {
+    init();
+  }
+  for(;;) pause();
+}
+```
+
+It's very concise and clear on what it is doing. We can roughly cut it into 3 parts: Part A calculates some parameters. Part B initializes each module. Part C moves into user mode and starts the first shell. Let's dive into each one of them now.
