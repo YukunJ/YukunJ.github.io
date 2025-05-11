@@ -10,6 +10,7 @@ author_profile: false
 Table of Contents
 + [Booting](#booting)
 + [Initialization](#initialization)
+  + [mem_init](#mem_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -280,3 +281,42 @@ void main(void) {
 It's very concise and clear on what it is doing. We can roughly cut it into 3 parts: Part A calculates some parameters. Part B initializes each module. Part C moves into user mode and starts the first shell. Let's dive into each one of them now.
 
 It first calculates the `memory_end` (which is 1MB + extended memory size) and `buffer_memory_end` (same as `main_memory_begin`). So basically the memory space is divided into 3 chunks right now. The first part is the Linux kernel program binary. The second part is the buffer memory. The third part is main memory.
+
+### mem_init
+
+`mm/memory.c` module is responsible for managing the main memory region. Its initialization is as follows:
+
+```c
+#define LOW_MEM 0x100000
+#define PAGING_MEMORY (15*1024*1024)
+#define PAGING_PAGES (PAGING_MEMORY>>12)
+#define MAP_NR(addr) (((addr)-LOW_MEM)>>12)
+#define USED 100
+
+static long HIGH_MEMORY = 0;
+static unsigned char mem_map [ PAGING_PAGES ] = {0,};
+
+void mem_init(long start_mem, long end_mem)
+{
+  int i;
+
+  HIGH_MEMORY = end_mem;
+  for (i=0 ; i<PAGING_PAGES ; i++)
+    mem_map[i] = USED;
+  i = MAP_NR(start_mem);
+  end_mem -= start_mem;
+  end_mem >>= 12;
+  while (end_mem-->0)
+    mem_map[i]=0;
+}
+```
+
+The meat of this init function is to properly initialize the page mapping array `mem_map` which indicates if a 4KB page is used or not. 
+
+It first initializes each page to be "**used**". And then it sets the page index corresponding to the main memory region `[start_mem, end_mem]` for be `0` to indicate it's eligible for allocation.
+
+In the `mm/memory.c` module another key function `get_free_page()` uses this `mem_map` key data structure. It's an inline assembly function so we will directly describe its procedure:
+
++ scan `mem_map` backward to find a free page
++ mark it as in-use and zero out the page
++ compute its physical address and return
