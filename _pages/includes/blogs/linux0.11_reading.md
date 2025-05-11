@@ -11,6 +11,7 @@ Table of Contents
 + [Booting](#booting)
 + [Initialization](#initialization)
   + [mem_init](#mem_init)
+  + [trap_init](#trap_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -320,3 +321,32 @@ In the `mm/memory.c` module another key function `get_free_page()` uses this `me
 + scan `mem_map` backward to find a free page
 + mark it as in-use and zero out the page
 + compute its physical address and return
+
+### trap_init
+
+Recall in the booting process we temporarily disable interrupts. Now in `trap_init` it will reset and register interrupt handler.
+
+```c
+// kernel/traps.c
+void trap_init(void)
+{
+  int i;
+
+  set_trap_gate(0,&divide_error);
+  ...
+  set_system_gate(4,&overflow);
+  ...
+  set_trap_gate(14,&page_fault);
+  set_trap_gate(15,&reserved);
+  set_trap_gate(16,&coprocessor_error);
+  for (i=17;i<48;i++)
+    set_trap_gate(i,&reserved);
+  ...
+}
+```
+
+It registers a bunch of interrupt descriptors to its corresponding handler functions. Number 17 to 48 is batch set to `reserved` because they will be overwritten later by each hardware device's initialization.
+
+Both `set_trap_gate` and `set_system_gate` call into the inline assembly macro `_set_gate` in `asm/system/h`, which registers the interrupt handler into the `idt` table. The slight difference between these 2 set methods is that `set_trap_gate` registers the gate as kernel mode (only code running in kernel mode can use this gate) while `set_system_gate` registers the gate as user mode.
+
+At this point all the interrupts handlers Linux registered are not yet taking effect. Later in the `main.c` function, `sti()` calls into assembly command `__asm__ ("sti"::)` which finally enables the interrupts.
