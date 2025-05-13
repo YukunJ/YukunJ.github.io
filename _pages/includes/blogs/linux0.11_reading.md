@@ -12,6 +12,7 @@ Table of Contents
 + [Initialization](#initialization)
   + [mem_init](#mem_init)
   + [trap_init](#trap_init)
+  + [blk_dev_init](#blk_dev_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -350,3 +351,51 @@ It registers a bunch of interrupt descriptors to its corresponding handler funct
 Both `set_trap_gate` and `set_system_gate` call into the inline assembly macro `_set_gate` in `asm/system/h`, which registers the interrupt handler into the `idt` table. The slight difference between these 2 set methods is that `set_trap_gate` registers the gate as kernel mode (only code running in kernel mode can use this gate) while `set_system_gate` registers the gate as user mode.
 
 At this point all the interrupts handlers Linux registered are not yet taking effect. Later in the `main.c` function, `sti()` calls into assembly command `__asm__ ("sti"::)` which finally enables the interrupts.
+
+### blk_dev_init
+
+Coming next is the `blk_dev_init` in `main()` function, which stands for block device. 
+
+```c
+// kernel/blk_drv/blk.h
+#define NR_REQUEST 32
+struct request {
+  int dev;         /* -1 if no request */
+  int cmd;         /* READ or WRITE */
+  int errors;
+  unsigned long sector;
+  unsigned long nr_sectors;
+  char * buffer;
+  struct task_struct * waiting;
+  struct buffer_head * bh;
+  struct request * next;
+}
+
+// kernel/blk_drv/ll_rw_blk.c
+struct request request[NR_REQUEST];
+void blk_dev_init(void)
+{
+  int i;
+
+  for (i=0; i<NR_REQUEST ; i++) {
+    request[i].dev = -1;
+    request[i].next = NULL;
+  }
+}
+```
+
+This init function looks simple: just zero-initialize the array of `struct request`. Each field for the `struct request` is self-explanatory:
+
++ `dev`: device id, -1 if no request
++ `cmd`: READ or WRITE
++ `errors`: number of errors happen during operation
++ `sector`: the beginning sector
++ `nr_sectors`: for how many sectors
++ `buffer`: the place to put data in memory after READ
++ `waiting`: which process initiates this request
++ `bh`: head pointer for buffering area
++ `next`: links to the next pending `struct request` 
+
+What is worth mentioning is that this `request` array makes the device I/O operation "**asynchronous**". The function `ll_rw_block` calls into `make_request` and returns from there. It adds an entry into the `request` array and delegates the work to the low-level device I/O driver to finish the task. And it could use the `wait_on_buffer(bh)` mechanism to check if the device has finished the I/O operations.
+
+`make_request` will lock this buffer to ensure exclusive ownership and then search for an empty slot in the `request` array. Notice the last one third of the array is reserved for **READ**s. so for **WRITE**s it only searches the first two third of the array. and then it fills this `struct request` and add it to the tail of the linked list of requests which is currently waiting to be serviced.
