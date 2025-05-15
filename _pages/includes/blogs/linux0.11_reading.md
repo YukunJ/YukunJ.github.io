@@ -13,6 +13,8 @@ Table of Contents
   + [mem_init](#mem_init)
   + [trap_init](#trap_init)
   + [blk_dev_init](#blk_dev_init)
+  + [tty_init](#tty_init)
+  + [time_init](#time_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -399,3 +401,61 @@ This init function looks simple: just zero-initialize the array of `struct reque
 What is worth mentioning is that this `request` array makes the device I/O operation "**asynchronous**". The function `ll_rw_block` calls into `make_request` and returns from there. It adds an entry into the `request` array and delegates the work to the low-level device I/O driver to finish the task. And it could use the `wait_on_buffer(bh)` mechanism to check if the device has finished the I/O operations.
 
 `make_request` will lock this buffer to ensure exclusive ownership and then search for an empty slot in the `request` array. Notice the last one third of the array is reserved for **READ**s. so for **WRITE**s it only searches the first two third of the array. and then it fills this `struct request` and add it to the tail of the linked list of requests which is currently waiting to be serviced.
+
+### tty_init
+
+Now it's time to make the keyboard input and display output working. There is a region of memory that's directly mapped to the display. Where is this region depends on which type of display and mode the system is using. For example the following will show "hello" on the screen. 
+
+```assembly
+# one byte for the character, the other byte for the color
+mov [0xb8000], 'h'
+mov [0xb8002], 'e'
+mov [0xb8004], 'l'
+mov [0xb8006], 'l'
+mov [0xb8007], 'o'
+```
+
+The main meat is the `con_init()` function that `tty_init()` calls into. It first retrieves a bunch of information about display mode and parameters from `0x90006` (Recall in `setup.s` we place these information there), finds out the direct mapping region for the current display. And then it locates the cursor and enable keyboard interrupts as follows:
+
+```c
+#define ORIG_X  (*(unsigned char *)0x90000)
+#define ORIG_Y  (*(unsigned char *)0x90001)
+void con_init(void) 
+{
+  ...
+  gotoxy(ORIG_X, ORIG_Y);
+  set_trap_gate(0x21, &keyboard_interrupt);
+  // toggle the bit and reset the keyboard interface
+  outb_p(inb_p(0x21)&0xfd, 0x21);
+  a=intb_p(0x61);
+  outb_p(a|0x80, 0x61);
+  outb(a, 0x61);
+}
+
+static inline void gotoxy(unsigned int new_x, unsigned int new_y)
+{
+  ...
+  x=new_x;
+  y=new_y;
+  pos=origin + y*video_size_row + (x<<1);
+}
+```
+
+The calling trace is a bit long for the keyboard input interrupte handler `keyboard_interrupt` which is an assembly function and it calls into `do_tty_interrupt` then `copy_to_cooked`, which eventually ends up in `con_write` in the case of display being the terminal.
+
+```c
+void con_write(struct tty_struct * tty) {
+  ...
+  __asm__("movb _attr,%%ah\n\t"
+    "movw %%ax,%l\n\t"
+    ::"a" (c),"m" (*(short *)pos)
+    :"ax");
+  pos += 2;
+  x++;
+  ...
+}
+```
+
+This assembly code basically writes the keyboard input character into memory pointed by `pos` and then adjusts the cursor position by incrementing `pos` and `x`.
+
+### time_init
