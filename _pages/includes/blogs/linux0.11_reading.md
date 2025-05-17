@@ -15,6 +15,7 @@ Table of Contents
   + [blk_dev_init](#blk_dev_init)
   + [tty_init](#tty_init)
   + [time_init](#time_init)
+  + [sched_init](#sched_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -459,3 +460,41 @@ void con_write(struct tty_struct * tty) {
 This assembly code basically writes the keyboard input character into memory pointed by `pos` and then adjusts the cursor position by incrementing `pos` and `x`.
 
 ### time_init
+
+How does the operating system know about the current time? In old days the computer is not always connected to the Internet. Let's dive into this part.
+
+```c
+#define CMOS_READ(addr) ({ \
+  outb_p(0x80|addr, 0x70); \
+  inb_p(0x71); \
+})
+
+#define BCD_TO_BIN(val) ((val)=((val)&15) + ((val)>>4)*10)
+
+static void time_init(void)
+{
+  struct tm time;
+  do {
+    time.tm_sec = CMOS_READ(0);
+    time.tm_min = CMOS_READ(2);
+    time.tm_hour = CMOS_READ(4);
+    time.tm_mday = CMOS_READ(7);
+    time.tm_mon = CMOS_READ(8);
+    time.tm_year = CMOS_READ(9);
+  } while (time.tm_sec != CMOS_READ(0)); // to get a consistent snapshot
+  BCD_TO_BIN(time.tm_sec);
+  BCD_TO_BIN(time.tm_min);
+  BCD_TO_BIN(time.tm_hour);
+  BCD_TO_BIN(time.tm_mday);
+  BCD_TO_BIN(time.tm_mon);
+  BCD_TO_BIN(time.tm_year);
+  time.tm_mon--;
+  startup_time = kernel_mktime(&time);  
+}
+```
+
+The way Linux knows about time to through interaction with hardware. Specifically, the **CMOS** device which is a RAM chip on the motherboard. It keeps track of time via a real-time clock (**RTC**), and is powered by a small battery that would last for several years. Hence even when the computer is powered off, the clock is still ticking for time keeping. `CMOS_READ` specifies the address to read into port `0x70` and read out the data from port `0x71`.
+
+It fills up the `struct tm` and eventually calculate out `startup_time`, which stands for how many seconds has passed since 1970 Jan 1 0'o clock.
+
+### sched_init
