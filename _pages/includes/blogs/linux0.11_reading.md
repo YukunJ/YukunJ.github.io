@@ -16,6 +16,7 @@ Table of Contents
   + [tty_init](#tty_init)
   + [time_init](#time_init)
   + [sched_init](#sched_init)
+  + [buffer_init](#buffer_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -498,3 +499,105 @@ The way Linux knows about time to through interaction with hardware. Specificall
 It fills up the `struct tm` and eventually calculate out `startup_time`, which stands for how many seconds has passed since 1970 Jan 1 0'o clock.
 
 ### sched_init
+
+Now this is the important part of Linux: scheduling. Let's breakdown the `sched_init` piece by piece.
+
+```c
+// kernel/sched.c
+void sched_init(void) {
+  ...
+  set_tss_desc(gdt+FIRST_TSS_ENTRY,&(init_task.task.tss));
+  set_ldt_desc(gdt+FIRST_LDT_ENTRY,&(init_task.task.ldt));
+  ...
+}
+```
+
+Recall Linux sets up the `gdt` global descriptor table with code segment and data segment. Now it is setting up the **tss** (task state segment) and **ldt** (local descriptor table) for the first task. `struct tss_struct` stores all the register information for a process, which is primarily used when OS does context switching between different processes. Code running in kernel mode uses the code segment and data segment in `gdt`, while code running in user mode uses each process' code segment and data segment in `ldt`.
+
+```c
+struct desc_struct {
+  unsigned long a,b;
+}
+
+struct task_struct * task[64] = {&(init_task.task), };
+
+void sched_init(void) {
+  ...
+  int i;
+  struct desc_struct * p;
+  p = gdt + 6;
+  for (i=1; i < 64; i++) {
+    task[i] = NULL;
+    p->a=p->b=0;
+    p++;
+    p->a=p->b=0;
+    p++;
+  }
+  ...
+}
+```
+
+Now it zero-initializes the rest 63 tasks's `struct task_struct` and their `tss` and `ldt` entries in `gdt`. Technically the task 0 `init_task` has not run yet. But Linux has already set it up so that in the future the "current" running code will become the task 0. We will copy paste the definition for the `struct task_struct` here for reference, which contains a lot of necessary information for managing each individual process.
+
+```c
+struct task_struct {
+  long state; /* -1 unrunnable, 0 runnable, >0 stopped */
+  long counter;
+  long priority;
+  long signal;
+  struct sigaction sigaction[32];
+  long blocked; /* bitmap of masked signals */
+/* various fields */
+  int exit_code;
+  unsigned long start_code,end_code,end_data,brk,start_stack;
+  long pid,father,pgrp,session,leader;
+  unsigned short uid,euid,suid;
+  unsigned short gid,egid,sgid;
+  long alarm;
+  long utime,stime,cutime,cstime,start_time;
+  unsigned short used_math;
+/* file system info */
+  int tty;  /* -1 if no tty, so it must be signed */
+  unsigned short umask;
+  struct m_inode * pwd;
+  struct m_inode * root;
+  struct m_inode * executable;
+  unsigned long close_on_exec;
+  struct file * filp[NR_OPEN];
+/* ldt for this task 0 - zero 1 - cs 2 - ds&ss */
+  struct desc_struct ldt[3];
+/* tss for this task */
+  struct tss_struct tss;
+};
+```
+
+Next, it sets up the `tr` register and `ldt` register to inform CPU about the location of `tss` and `ldt` in memory for the current process.
+
+```c
+#define ltr(n) __asm__("ltr %%ax"::"a" (_TSS(n)))
+#define lldt(n) __asm__("lldt %%ax"::"a" (_LDT(n)))
+
+void sched_init(void) {
+  ...
+  ltr(0);
+  lldt(0);
+  ...
+}
+```
+
+Finally it enables the timer interrupt via **PIC** (programmable interrupt controller), which sends interrupt to Linux on a regular basis (100 times per second via `#define HZ 100`) and helps Linux to schedule process. And also the `system_call` is enabled so that user process could use low-level kernel function like `sys_read`.
+
+```c
+void sched_init(void) {
+  ...
+  outb_p(0x36,0x43);
+  outb_p(LATCH & 0xff, 0x40); 
+  outb(LATCH >> 8, 0x40);
+  set_intr_gate(0x20, &timer_interrupt);
+  outb(inb_p(0x21)&~0x01, 0x21);
+  set_system_gate(0x80, &system_call);
+  ...
+}
+```
+
+### buffer_init
