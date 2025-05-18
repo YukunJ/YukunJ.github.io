@@ -17,6 +17,7 @@ Table of Contents
   + [time_init](#time_init)
   + [sched_init](#sched_init)
   + [buffer_init](#buffer_init)
+  + [hd_init](#hd_init)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -601,3 +602,56 @@ void sched_init(void) {
 ```
 
 ### buffer_init
+
+```c
+// fs/buffer.c
+extern int end;
+struct buffer_head * start_buffer = (struct buffer_head *) &end;
+
+void buffer_init(long buffer_end) {
+  struct buffer_head * h = start_buffer;
+  void * b = (void *) buffer_end;
+  while ( (b -= 1024) >= ( (void *) (h+1)) ) {
+    h->b_dev = 0;
+    ...
+    h->b_date = (char *) b;
+    h->b_prev_free = h-1;
+    h->b_next_free = h+1;
+    h++;
+  }
+  h--;
+  free_list = start_buffer;
+  free_list->b_prev_free = h;
+  h->b_next_free = free_list;
+  for (int i=0; i<307; i++) {
+    hash_table[i] = NULL;
+  }
+}
+```
+
+That's all for the `buffer_init`. Let's analyze it line by line. The extern variable `end` is set by the linker, which indicates the end of the Linux kernel program in memory (aka `[0, end]` is the Linux kernel program). Earlier in the `main` function it calculates the `buffer_end` and pass it in here as the argument. 
+
+So the range `[start_buffer, buffer_end]` is what to be managed by the `buffer` module. It uses a doubly linked list `struct buffer_head`. Each manages a **1024**-byte block of buffer memory. The memory layout is as follows:
+
+```bash
+block_1 <--------- buffer_end
+block_2
+block_3
+...
+block_n
+[wasted_space]
+head_n
+...
+head_3
+head_2
+head_1 <--------- start_buffer
+```
+
+Finally, the **307** hashtable is used to help find if a block of data is in buffer space when the operating system needs to read data from block device. Iterating through the whole doubly linked list is not efficient. It uses `dev^block %307` as the hashing to find the buffer head directly.
+
+```c
+#define _hashfn(dev,block) (((unsigned)(dev^block))%307)
+#define hash(dev,block) hash_table[_hashfn(dev,block)]
+```
+
+### hd_init
