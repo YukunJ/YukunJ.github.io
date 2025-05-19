@@ -655,3 +655,40 @@ Finally, the **307** hashtable is used to help find if a block of data is in buf
 ```
 
 ### hd_init
+
+floppy disk is retried by now. so we will skip `floppy_init()` and only take a look at the hardware disk `hd_init()`.
+
+```c
+void main(void) {
+  ...
+  hd_init();
+  floppy_init();
+  ...
+}
+
+// kernel/blk_drv/hd.c
+#define MAJOR_NR 3
+#define NR_BLK_DEV 7
+#define DEVICE_REQUEST do_hd_request
+
+struct blk_dev_struct {
+  void (*request_fn)(void);
+  struct request * current_request;
+};
+
+extern struct blk_dev_struct blk_dev[NR_BLK_DEV];
+
+void hd_init(void)
+{
+  blk_dev[MAJOR_NR].request_fn = DEVICE_REQUEST;
+  set_intr_gate(0x2E,&hd_interrupt);
+  outb_p(inb_p(0x21)&0xfb,0x21);
+  outb(inb_p(0xA1)&0xbf,0xA1);
+}
+```
+
+Linux uses an array of `struct blk_dev_struct` to manage different types of device. Each of it contains a function pointer `request_fn` recording how to interact with that device. This is the C/Linux way of polymorphism. Here it initializes the index 3 (`hd`)'s function pointer to `do_hd_request`.
+
+Aferwards it registers the `0x2E` interrupt handler to be `hd_interrupt`. The 2 last lines of IO ports writing and reading enables hardware disk controller to send interrupt to the CPU.
+
+
