@@ -18,6 +18,8 @@ Table of Contents
   + [sched_init](#sched_init)
   + [buffer_init](#buffer_init)
   + [hd_init](#hd_init)
++ [First Process](#firstprocess)
+  + [move_to_user_mode](#move_to_user_mode)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -691,4 +693,48 @@ Linux uses an array of `struct blk_dev_struct` to manage different types of devi
 
 Aferwards it registers the `0x2E` interrupt handler to be `hd_interrupt`. The 2 last lines of IO ports writing and reading enables hardware disk controller to send interrupt to the CPU.
 
+## FirstProcess
 
+### move_to_user_mode
+
+```c
+// include/asm/system.h
+#define move_to_user_mode() \
+_asm { \
+  _asm mov eax,esp \
+  _asm push 00000017h \
+  _asm push eax \
+  _asm pushfd \
+  _asm push 0000000fh \
+  _asm push offset l1 \
+  _asm iretd \
+_asm l1: mov eax,17h \
+  _asm mov ds,ax \
+  _asm mov es,ax \
+  _asm mov fs,ax \
+  _asm mov gs,ax \
+}
+```
+
+Let's put the conclusion first: 
++ **Code**: could only jump to code in same privilege level via a regular `jmp` or `call` (kernel mode to kernel mode, user mode to user mode)
++ **Data**: could access data in same or lower privilege level (kernel mode can access user mode data, but not vice versa)
+
+Recall when interrupt happens, CPU will push 5 variables into the stack for us. And upon returning from the interrupt, it will pop back the 5 variables. The order is as follows:
+
+```bash
+Upon interrupt:
+push 
++ ss (stack segment )
++ esp (stack pointer)
++ eflags (flag register)
++ cs (code segment)
++ eip (instruction register)
+
+Upon return from the interrupt:
+pop them back in reverse order
+```
+
+Here Linux plays a nice trick of "faking an interrupt". It manually pushes the 5 variables into the stack as of an interrupt has happened. 
+
+In x86, the bottom 2 bits of a segment selector are the Requested Privilege Level (**RPL**). Here the last 2 bits of `00000017h` and `0000000fh` (for `ss` and `cs` respectively) are `0b11` which stands for ring 3 user mode. And the relative address of tag `l1` is pushed in as the return address. Hence, when `iretd` is executed, the code flow actually continues to move to the next line with privilege level switched to user mode already.
