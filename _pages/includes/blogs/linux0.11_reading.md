@@ -20,6 +20,7 @@ Table of Contents
   + [hd_init](#hd_init)
 + [First Process](#firstprocess)
   + [move_to_user_mode](#move_to_user_mode)
+  + [scheduling process](#scheduling_process)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -738,3 +739,87 @@ pop them back in reverse order
 Here Linux plays a nice trick of "faking an interrupt". It manually pushes the 5 variables into the stack as of an interrupt has happened. 
 
 In x86, the bottom 2 bits of a segment selector are the Requested Privilege Level (**RPL**). Here the last 2 bits of `00000017h` and `0000000fh` (for `ss` and `cs` respectively) are `0b11` which stands for ring 3 user mode. And the relative address of tag `l1` is pushed in as the return address. Hence, when `iretd` is executed, the code flow actually continues to move to the next line with privilege level switched to user mode already.
+
+### scheduling_process
+
+Now we will look at the workflow of how Linux schedules and switches between different processes. Recall it enables the clock time interrupt earlier in `sched_init()`. So every time the time interrupt happens, the CPU could decide to switch to a different process to run.
+
+A few things to consider first is: What it takes to context switch between different processes?
+
++ **context**: one CPU only has 1 set of registers. So every process has to "share" these registers upon switching. 
+
+In each process' `struct task_struct` there is a `struct tss_struct tss` which contains all the value copy of the set of registers upon context switching.
+
+```c
+// include/linux/sched.h
+struct task_struct {
+  ...
+  struct tss_struct tss;
+}
+
+struct tss_struct {
+  long  back_link;	/* 16 high bits zero */
+  long  esp0;
+  long  ss0;		/* 16 high bits zero */
+  long  esp1;
+  long  ss1;		/* 16 high bits zero */
+  long  esp2;
+  long  ss2;		/* 16 high bits zero */
+  long  cr3;
+  long  eip;
+  long  eflags;
+  long  eax,ecx,edx,ebx;
+  long  esp;
+  long  ebp;
+  long  esi;
+  long  edi;
+  long  es;		/* 16 high bits zero */
+  long  cs;		/* 16 high bits zero */
+  long  ss;		/* 16 high bits zero */
+  long  ds;		/* 16 high bits zero */
+  long  fs;		/* 16 high bits zero */
+  long  gs;		/* 16 high bits zero */
+  long  ldt;		/* 16 high bits zero */
+  long  trace_bitmap;	/* bits: trace 0, bitmap 16-31 */
+  struct i387_struct i387;
+};
+```
+
++ **time**: CPU needs to know how long each process has run to be able to make a decision about context switching.
+
+```c
+struct task_struct {
+  ...
+  long counter;
+  long priority;
+  ...
+}
+
+void do_timer(long cpl) {
+  ...
+  if ((--current->counter)>0) return;
+  schedule();
+}
+```
+
+This `counter` will decrement every time interrupt happens for the current running process. If it reaches 0, then CPU will schedule another process to run to be fair.
+
+And every time a new process is scheduled to run, its `counter` is initialized to its `priority` field. Intutively, the higher the priority, the longer it could own the CPU and run its task before the CPU is given away to another process.
+
++ **state**: not every process is able to utilize the CPU at any given time. For example it might be blocked waiting on I/O read/write from the disk.
+
+Hence Linux also needs to keep track of "if this process is willing/able to utilize the CPU now". It keeps track of each process' readiness via the `state` variable.
+
+```c
+#define TASK_RUNNING  0
+#define TASK_INTERRUPTIBLE  1
+#define TASK_UNINTERRUPTIBLE  2
+#define TASK_ZOMBIE 3
+#define TASK_STOPPED  4
+
+struct task_struct {
+  ...
+  long state;
+  ...
+}
+```
