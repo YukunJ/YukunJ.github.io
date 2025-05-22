@@ -19,8 +19,9 @@ Table of Contents
   + [buffer_init](#buffer_init)
   + [hd_init](#hd_init)
 + [First Process](#firstprocess)
-  + [move_to_user_mode](#move_to_user_mode)
+  + [move to user mode](#move_to_user_mode)
   + [scheduling process](#scheduling_process)
+  + [system call](#system_call)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -823,3 +824,42 @@ struct task_struct {
   ...
 }
 ```
+
+Now let's take a look at the `schedule()` when the current process' `counter` decrements to zero and the operating system decides to switch to a different process.
+
+```c
+void schedule(void)
+{
+  int i, next, c;
+  struct task_struct ** p;
+  ...
+  while (1) {
+    c = -1;
+    next = 0;
+    i = NR_TASKS;
+    p = &task[NR_TASKS];
+    while (--i) {
+      if (!*--p)
+        continue;
+      if ((*p)->state == TASK_RUNNING && (*p)->counter > c)
+        c = (*p)->counter, next = i;
+    }
+    if (c) break;
+    for(p = &LAST_TASK; p > &FIRST_TASK; --p)
+      if (*p)
+        (*p)->counter = ((*p)->counter >> 1) + (*p)->priority;
+  }
+  switch_to(next);
+}
+```
+
+Basically Linux is doing 3 simple things here:
+
+1. Find the `TASK_RUNNING` state process with maximum remaining `counter`, call it `next`.
+2. If all `TASK_RUNNING` processes' remaining `counter` are 0, reinitialize each process' to be `counter = counter/2 + priority`.
+3. call the assembly function `switch_to(next)`.
+
+There is one magic part `ljmp` long jump in the `switch_to` call. The CPU will recognize it if `ljmp` jumps to a TSS (Task State Segment) and will automatically save the old task's state and load the new task's state.
+
+
+### system_call
