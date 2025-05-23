@@ -21,7 +21,7 @@ Table of Contents
 + [First Process](#firstprocess)
   + [move to user mode](#move_to_user_mode)
   + [scheduling process](#scheduling_process)
-  + [system call](#system_call)
+  + [fork() system call](#system_call)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -861,5 +861,81 @@ Basically Linux is doing 3 simple things here:
 
 There is one magic part `ljmp` long jump in the `switch_to` call. The CPU will recognize it if `ljmp` jumps to a TSS (Task State Segment) and will automatically save the old task's state and load the new task's state.
 
-
 ### system_call
+
+Now we will take a look at how system call works in Linux through the example of `fork()` from the `main` function.
+
+The following macro template constructs the function defintions for all system calls that do not take in any parameter. `fork` is one of them.
+```c
+static _inline _syscall0(int, fork)
+
+#define _syscall0(type, name) \
+type name(void) \
+{ \
+long __res; \
+__asm__ volatile ("int $0x80" \
+  : "=a" (__rse) \
+  : "0" (__NR_##name)); \
+if (__res >= 0) \
+  return (type) __res; \
+errno = -__res; \
+return -1; \
+}
+```
+
+Notice the key line here is `int 80h` with parameter `__NR_fork = 2`. Recall in `sched_init` we set the interrupt number `0x80`'s handler:
+
+```c
+// kernel/sched.c
+set_system_gate(0x80, &system_call);
+```
+
+And this `system_call` function will step into the `sys_call_table` array to retrieve the corresponding system call handler function.
+
+```assembly
+// kernel/system_call.s
+_system_call:
+  ...
+  call [_sys_call_table + eax*4]
+  ...
+```
+
+This `sys_call_table` defines all the system call functions that Linux provides users with.
+
+```c
+// include/linux/sys.h
+typedef int (*fn_ptr)();
+fn_ptr sys_call_table[] = { sys_setup, sys_exit, sys_fork, sys_read,
+sys_write, sys_open, sys_close, sys_waitpid, sys_creat, sys_link,
+sys_unlink, sys_execve, sys_chdir, sys_time, sys_mknod, sys_chmod,
+sys_chown, sys_break, sys_stat, sys_lseek, sys_getpid, sys_mount,
+sys_umount, sys_setuid, sys_getuid, sys_stime, sys_ptrace, sys_alarm,
+sys_fstat, sys_pause, sys_utime, sys_stty, sys_gtty, sys_access,
+sys_nice, sys_ftime, sys_sync, sys_kill, sys_rename, sys_mkdir,
+sys_rmdir, sys_dup, sys_pipe, sys_times, sys_prof, sys_brk, sys_setgid,
+sys_getgid, sys_signal, sys_geteuid, sys_getegid, sys_acct, sys_phys,
+sys_lock, sys_ioctl, sys_fcntl, sys_mpx, sys_setpgid, sys_ulimit,
+sys_uname, sys_umask, sys_chroot, sys_ustat, sys_dup2, sys_getppid,
+sys_getpgrp, sys_setsid, sys_sigaction, sys_sgetmask, sys_ssetmask,
+sys_setreuid,sys_setregid, sys_iam, sys_whoami };
+```
+
+Here we finally find the kernel-level function `sys_fork`.
+
+```assembly
+// kernel/system_call.s
+_sys_fork:
+  call _find_empty_process
+  testl %eax,%eax
+  js lf
+  push %gs
+  pushl %esi
+  pushl %edi
+  pushl %ebp
+  pushl %edi
+  pushl %ebp
+  pushl %eax
+  call _copy_process
+  addl $20, %esp
+1: ret
+```
