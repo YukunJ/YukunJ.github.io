@@ -939,3 +939,59 @@ _sys_fork:
   addl $20, %esp
 1: ret
 ```
+
+So the 2 main subroutines of this function is `find_empty_process` and `copy_process`.
+
+The `find_empty_process` is very short and easy to understand. It finds the next `pid` to assign to the new process and find it an empty slot in the `task[64]` strucy array.
+
+```c
+// kernel/fork.c
+long last_pid = 0;
+
+int find_empty_process(void) {
+  int i;
+  repeat:
+    if ((++last_pid)<0) last_pid = 1;
+    for (i=0 ; i<64 ; i++)
+      if (task[i] && task[i]->pid == last_pid) goto repeat;
+    for (i=1 ; i <64 ; i++)
+      if (!task[i])
+        return i;
+    return -EAGAIN;
+}
+```
+
+Recall so far we only have 1 process and only `task[0]` is occupied. Therefore it will find the index to be 1 and last_pid to be 1.
+
+Then the `copy_process` is verbosely long since it copies a lot of entries for the tss struct. Let's look at an simplified version of it:
+
+```c
+// kernel/fork.c
+int copy_process(int nr, ...) {
+  struct task_struct *p = (struct task_struct *) get_free_page();
+  task[nr] = p;
+  *p = *current;
+  ...
+  p->state = TASK_UNINTERRUPTIBLE;
+  p->pid = last_pid;
+  p->counter = p->priority;
+  ...
+  p->tss.edx = edx;
+  p->tss.ebx = ebx;
+  p->tss.esp = esp;
+  ...
+  p->tss.esp0 = PAGE_SIZE + (long) p;
+  p->tss.ss0 = 0x10;
+  ...
+  copy_mem(nr, p);
+  ...
+  set_tss_desc(gdt+(nr<<1)+FIRST_TSS_ENTRY, &(p->tss));
+  set_ldt_desc(gdt+(nr<<1)+FIRST_LDT_ENTRY, &(p->ldt));
+  p->state = TASK_RUNNING;
+  return last_pid;
+}
+```
+
+It firstly finds a free page of 4KB memory from `get_free_page` and uses it for the new `task_struct`. (Recall in `mem_init` we introduce that this `get_free_page` basically iterates over the `mem_map[]` array to find an entry with 0 reference, indicating a free page).
+
+After resetting a few custom fields for the `p->tss`, notice the `esp0` and `ss0`. For every new process its `ss0` segment selector for the kernel data segment is set to `0x10`. And the kernel mode stack pointer for this new process `esp0` is set to the top of its newly-requested 4KB memory `PAGE_SIZE + (long) p`, since stack grows downward. 
