@@ -994,4 +994,43 @@ int copy_process(int nr, ...) {
 
 It firstly finds a free page of 4KB memory from `get_free_page` and uses it for the new `task_struct`. (Recall in `mem_init` we introduce that this `get_free_page` basically iterates over the `mem_map[]` array to find an entry with 0 reference, indicating a free page).
 
-After resetting a few custom fields for the `p->tss`, notice the `esp0` and `ss0`. For every new process its `ss0` segment selector for the kernel data segment is set to `0x10`. And the kernel mode stack pointer for this new process `esp0` is set to the top of its newly-requested 4KB memory `PAGE_SIZE + (long) p`, since stack grows downward. 
+After resetting a few custom fields for the `p->tss`, notice the `esp0` and `ss0`. For every new process its `ss0` segment selector for the kernel data segment is set to `0x10`. And the kernel mode stack pointer for this new process `esp0` is set to the top of its newly-requested 4KB memory `PAGE_SIZE + (long) p`, since stack grows downward.
+
+Now let's take a look at the `copy_mem` which copies the process local descriptor table entry and page table.
+
+```c
+// kernel/fork.c
+int copy_mem(int nr, struct task_struct * p) {
+  unsigned long old_data_base,new_data_base,data_limit;
+  unsigned long old_code_base,new_code_base,code_limit;
+  code_limit = get_limit(0x0f);
+  data_limit = get_limit(0x17);
+  new_code_base = nr * 0x4000000;
+  new_data_base = nr * 0x4000000;
+  p->state_code = new_code_base
+  set_base(p->ldt[1],new_code_base);
+  set_base(p->ldt[2],new_data_base);
+  old_code_base = get_base(current->ldt[1]);
+  old_data_base = get_base(current->ldt[2]);
+  copy_page_tables(old_data_base,new_data_base,data_limit);
+  return 0;
+}
+```
+
+Each process will have a **64MB** memory space separated by `nr * 0x4000000`. In the `copy_page_table` Linux copies the page table entries in the way that, for the parent and child process when they are referencing the same process virtual memory address, the memory paging, even though done by walking a different page table, will result in the same physical memory address.
+
+Notice one tiny detail hidden:
+
+```c
+// mm/memory.c
+int copy_page_tables(unsigned long from, unsigned long to, long size) {
+  ...
+  for ( ; size-->0 ; from_page_table++,to_page_table++) {
+    ...
+    for ( ; nr-->0 ; from_page_table++,to_page_table++) {
+      ...
+      this_page &= ~2;
+}
+```
+
+The second bit of a page table entry is the **RW** permission bit. Here when copying the page table from parent process to child process, Linux masks off the RW bit to set this page to be **read-only** since they are sharing the same physical memory space. This is the basic of **COW** (Copy on Write). When any of the parent or child process wants to write to a shared read-only page, it will trigger page-fault and make a new copy of the page to be written to so that it's no longer shared.
