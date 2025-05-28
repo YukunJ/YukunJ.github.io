@@ -1034,3 +1034,28 @@ int copy_page_tables(unsigned long from, unsigned long to, long size) {
 ```
 
 The second bit of a page table entry is the **RW** permission bit. Here when copying the page table from parent process to child process, Linux masks off the RW bit to set this page to be **read-only** since they are sharing the same physical memory space. This is the basic of **COW** (Copy on Write). When any of the parent or child process wants to write to a shared read-only page, it will trigger page-fault and make a new copy of the page to be written to so that it's no longer shared.
+
+Let's take a short detour on how the COW is implemented. When a process tries to write to a page that's marked as read-only, it will trigger a page-fault. The `do_page_fault` function will lead eventually to the `un_wp_page` function as follows:
+
+```c
+void un_wp_page(unsigned long * table_entry)
+{
+  unsigned long old_page,new_page;
+
+  old_page = 0xfffff000 & *table_entry;
+  if (old_page >= LOW_MEM && mem_map[MAP_NR(old_page)] ==1) {
+    *table_entry |= 2;
+    invalidate();
+    return;
+  }
+  if (!(new_page=get_free_page()))
+    oom();
+  if (old_page >= LOW_MEM)
+    mem_map[MAP_NR(old_page)]--;
+  *table_entry = new_page | 7;
+  invalidate();
+  copy_page(old_page, new_page);
+}
+```
+
+The above code handles two cases: (1) When the reference to the page is only **1**, aka it's not a shared page. It will directly set the **R/W** bit to be 1 to indicate it's writable now. (2) When this page is referenced by more than **1** processes, it will decrement the reference to the old page by 1, allocate a new page to be read-write-able and copy the content of the old page to the new page to be used exclusively by the writing process.
