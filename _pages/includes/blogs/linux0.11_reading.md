@@ -22,6 +22,7 @@ Table of Contents
   + [move to user mode](#move_to_user_mode)
   + [scheduling process](#scheduling_process)
   + [fork() system call](#system_call)
++ [Begin of the Shell Program](#shell)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1059,3 +1060,43 @@ void un_wp_page(unsigned long * table_entry)
 ```
 
 The above code handles two cases: (1) When the reference to the page is only **1**, aka it's not a shared page. It will directly set the **R/W** bit to be 1 to indicate it's writable now. (2) When this page is referenced by more than **1** processes, it will decrement the reference to the old page by 1, allocate a new page to be read-write-able and copy the content of the old page to the new page to be used exclusively by the writing process.
+
+## Shell
+
+Now we will see how Linux starts the shell program that will indefinitly wait for user input in the terminal and execute commands correspondingly.
+
+```c
+// init/main.c
+void init(void) {
+  int pid,i;
+  setup((void *) &drive_info);
+  (void) open("/dev/tty0", O_RDWR, 0);
+  (void) dup(0);
+  (void) dup(0);
+  if (!(pid=fork())) {
+    open("etc/rc", O_RDONLY, 0);
+    execve("/bin/sh", argv_rc, envp_rc);
+  }
+  if (pid>0)
+    while (pid != wait(&i))
+      /* nothing */;
+  while (1) {
+    if (!pid=fork()) {
+      close(0); 
+      close(1); 
+      close(2);
+      setsid();
+      (void) open("dev/tty0", O_RDWR, 0);
+      (void) dup(0);
+      (void) dup(0);
+      _exit(execve("/bin/sh", argv, envp));
+    }
+    while (1)
+      if (pid == wait(&i))
+        break;
+    sync();
+  }
+  _exit(0); /* NOTE! _exit, not exit() */
+}
+```
+
