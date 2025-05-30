@@ -23,6 +23,8 @@ Table of Contents
   + [scheduling process](#scheduling_process)
   + [fork() system call](#system_call)
 + [Begin of the Shell Program](#shell)
+  + [retrieve drive info](#drive_info)
+  + [mount root file system](#mount_root)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1100,3 +1102,61 @@ void init(void) {
 }
 ```
 
+### drive_info
+
+Let's look at the first line of the `init` function.
+
+```c
+void init(void) {
+  setup((void *) &drive_info);
+  ...
+}
+```
+
+This `setup` function processes the `drive_info = (*(struct drive_info *)0x90080)` we set earlier in `setup.s` routines, and eventually gets into the `sys_setup` system call to retrieve hardware drive information.
+
+Assuming there is only 1 disk, the code could be simplified as following:
+
+```c
+int sys_setup(void * BIOS) {
+  hd_info[0].cyl =   *(unsigned short *) BIOS;
+  hd_info[0].head =  *(unsigned char  *) (2+BIOS);
+  hd_info[0].wpcom = *(unsigned short *) (5+BIOS);
+  hd_info[0].ctl =   *(unsigned char  *) (8+BIOS);
+  hd_info[0].lzone = *(unsigned short *) (12+BIOS);
+  hd_info[0].sect =  *(unsigned char  *) (14+BIOS);
+  BIOS += 16;
+  ...
+}
+```
+
+The **BIOS** is from memory location `0x90080` storing the information about hardware drive 1. Here these information is retrieved and stored into `hf_info[0]`.
+
+Then it needs to deal with disk partition:
+
+```c
+int sys_setup(void * BIOS) {
+  ...
+  hd[0].start_sect = 0;
+  hd[0].nr_sects = hd_info[0].head * hd_info[0].sect * hd_info[0].cyl;
+  struct buffer_head *bh = bread(0x300, 0);
+  struct partition *p = 0x1BE + (void *)bh->b_data;
+  for (int i=1;i<5;i++,p++) {
+    hd[i].start_sect = p->start_sect;
+    hd[i].nr_sects = p->nr_sects;
+  }
+  brelse(bh);
+  ...
+  rd_load();
+  mount_root();
+  return 0;
+}
+```
+
+The partition information is stored at offset `0x1BE` from the 1st disk sector. Hence here it reads the first block of the disk 1 via `bread(0x300, 0)` (`0x300` is its device number) into memory and add the offset to get the partition information.
+
+We will skip `rd_load` which is about virtual memory disk. It uses a small chunk of memory as disk when enabled. 
+
+In next section we will talk about `mount_root` the root file system.
+
+### mount_root
