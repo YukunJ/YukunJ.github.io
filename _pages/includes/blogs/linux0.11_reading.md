@@ -25,6 +25,7 @@ Table of Contents
 + [Begin of the Shell Program](#shell)
   + [retrieve drive info](#drive_info)
   + [mount root file system](#mount_root)
+  + [open terminal device file](#tty)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1160,3 +1161,89 @@ We will skip `rd_load` which is about virtual memory disk. It uses a small chunk
 In next section we will talk about `mount_root` the root file system.
 
 ### mount_root
+
+Now let's look at the last function in init -- `mount_root`. On a high level it aims to load the data in disk in a file-system format into some data structures in the memory, so that it could access files in disk afterwards.
+
+In Linux 0.11, it uses the **MINIX** file system whose structure is as follows:
+
+```bash
+[boot block] [super block] [inode bitmap] [block bitmap] [inode] ... [inode] [block] ... [block]
+```
+
+Every block is of size 1KB. The super block contains a few important fields:
++ `s_ninodes`: number of inodes
++ `s_nzones`: number of blocks
++ `s_imap_blocks`: number of blocks for inode bitmap
++ `s_zmap_blocks`: number of blocks for block bitmap
++ `s_firstdatazone`: the first block location
+
+And inode contains fields:
++ `i_mode`: file type
++ `i_size`: file size
++ `i_mtime`: modify time
++ `i_zone[9]`: block mapping array. First 7 indexes are direct mapping. The 8th is 1-level indirection mapping and the 9th is 2-level indirection mapping.
+
+Now we can examine how such information is structured and stored in the Linux as data structures:
+
+```c
+sturct file {
+  unsigned short f_mode;
+  unsigned short f_flags;
+  unsigned short f_count;
+  struct m_inode * f_node;
+  off_t f_pos;
+};
+
+#define NR_FILE 8192
+#define NR_SUPER 8
+struct file file_table[NR_FILE];
+struct super_block super_block[NR_SUPER];
+
+// fs/super.c
+void mount_root(void) {
+  int i,free;
+  struct super_block * p;
+  struct m_inode * mi;
+  for (i=0;i<NR_FILE;i++)
+    file_table[i].f_count=0;
+  for (p = &super_block[0] ; p < &super_block[NR_SUPER]; p++) {
+    p->s_dev = 0;
+    p->s_lock = 0;
+    p->s_wait = NULL;
+  }
+  ...
+}
+```
+
+Here it first zeros out the `file_table` f_count field. For every file a process uses, it needs to be recorded in this table. And `f_count` counts how many times this file is referenced. And it also zeroes out the super_block array.
+
+Next, it reads the super block and root inode into memory, and set that root inode to be the current working directory and root directory.
+
+```c
+void mount_root(void) {
+  ...
+  p=read_super(ROOT_DEV);
+  mi=iget(ROOT_DEV,ROOT_INO);
+  ...
+  current->pwd = mi;
+  current->root = mi;
+}
+```
+
+Finally, it preemptively marks all the blocks and inodes as used. This is a preparatory step before selectively freeing them later. 
+
+```c
+void mount_root(void) {
+  ...
+  i=p->s_nzones;
+  while (-- i >= 0)
+    set_bit(i&8191, p->s_zmap[i>>13]->b_data);
+  ...
+  i=p->s_ninodes+1;
+  while (-- i >= 0)
+    set_bit(i&8191, p->s_imap[i>>13]->b_data);
+  ...
+}
+```
+
+### tty
