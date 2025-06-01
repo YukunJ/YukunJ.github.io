@@ -26,6 +26,7 @@ Table of Contents
   + [retrieve drive info](#drive_info)
   + [mount root file system](#mount_root)
   + [open terminal device file](#tty)
+  + [the 2nd process](#second_process)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1162,7 +1163,7 @@ In next section we will talk about `mount_root` the root file system.
 
 ### mount_root
 
-Now let's look at the last function in init -- `mount_root`. On a high level it aims to load the data in disk in a file-system format into some data structures in the memory, so that it could access files in disk afterwards.
+Now let's look at the last function in setup -- `mount_root`. On a high level it aims to load the data in disk in a file-system format into some data structures in the memory, so that it could access files in disk afterwards.
 
 In Linux 0.11, it uses the **MINIX** file system whose structure is as follows:
 
@@ -1247,3 +1248,90 @@ void mount_root(void) {
 ```
 
 ### tty
+
+Now we will look at the next 3 lines of code in init, which open the terminal device file.
+
+```c
+// init/main.c
+void init(void) {
+  ...
+  (void) open("/dev/tty0",O_RDWR,0);
+  (void) dup(0);
+  (void) dup(0);
+}
+```
+
+The `open` function will trigger system call interrupt into `sys_open` function. Let's break it down.
+
+```c
+#define NR_OPEN 20
+#define NR_FILE 64
+struct file file_table[NR_FILE];
+
+// fs/open.c
+int sys_open(const char * filename, int flag, int mode)
+{
+  ...
+  for (int fd=0 ; fd < NR_OPEN; fd++)
+    if (!current->filp[fd])
+      break;
+  if (fd >= NR_OPEN)
+    return -EINVAL;
+  ...
+  struct file * f=0+file_table;
+  for (i=0 ; i<NR_FILE; i++,f++)
+    if (!f->f_count) break;
+  if (i>=NR_FILE)
+    return -EINVAL;
+  ...
+}
+```
+
+The first part of this `sys_open` tries to find an empty slot in the process' file descriptor `filp` array, and then find an empty slot in the system's `file_table`. We can see from the macro definitions here that each process can open at most **20** files and the whole system can have at most **64** open files.
+
+```c
+int sys_open(const char * filename, int flag, int mode)
+{
+  struct m_inode * inode;
+  struct file * f;
+  ...
+  current->filp[fd] = f;
+  ...
+  open_namei(filename,flag,mode,&inode);
+  ...
+  f->f_mode = inode->i_mode;
+  f->f_flags = flag;
+  f->f_count = 1;
+  f->f_inode = inode;
+  f->f_pos = 0;
+  return fd;
+}
+```
+It links the process file descriptor and the system open file. It retrieves the inode based on the filename, and initialize the `struct file`.
+
+For the next 2 consecutive `dup(0)` calls: on a high level it maps **fd#1** to be standard output (stdout) and **fd#2** to be standard error (stderr). (The **fd#0** is found and mapped to be standard input (stdin) from the `sys_open` above)
+
+The way `dup` works is very simple: find the next empty slot in the process' filp array, and copy over the `struct file *` pointed by the fd to-be-copied.
+
+```c
+// fs/fcntl.c
+int sys_dup(unsigned int fildes) {
+  return dupfd(fildes, 0);
+}
+
+static int dupfd(unsigned int fd, unsigned int arg) {
+  ...
+  while (arg < NR_OPEN)
+    if (current->filp[arg])
+      arg++;
+    else
+      break;
+  ...
+  (current->filp[arg] = current->filp[fd])->f_count++;
+  return arg;
+}
+```
+
+A note here that later when Linux `fork`s to another process, the child process will inherit the filp fd array. So the next process will naturally have the ability to interact with terminal device with fd#0, fd#1 and fd#2 without having to set this up again.
+
+### second_process
