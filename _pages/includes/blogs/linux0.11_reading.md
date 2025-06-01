@@ -1335,3 +1335,33 @@ static int dupfd(unsigned int fd, unsigned int arg) {
 A note here that later when Linux `fork`s to another process, the child process will inherit the filp fd array. So the next process will naturally have the ability to interact with terminal device with fd#0, fd#1 and fd#2 without having to set this up again.
 
 ### second_process
+
+Now we will look at the part where the 2nd process is created during init function.
+
+```c
+void init(void) {
+  ...
+  if (!(pid=fork())) {
+    close(0);
+    open("/etc/rc",O_RDONLY,0);
+    execve("/bin/sh",argv_rc,envp_rc);
+    _exit(2);
+  }
+  ...
+}
+```
+
+It first `fork`s out a new child process, and in the child process it closes the **fd#0** (which is previously mapped as standard input to the terminal device file). `close` calls into `sys_close` which decrements the whole system reference count to that file and removes that handler from this process' filp fd table.
+
+```c
+int sys_close(unsigned int fd) {
+  ...
+  current->filp[fd]->f_count--;
+  current->filp[fd] = NULL;
+  ...
+}
+```
+
+And then it opens the `/etc/rc` file to be the fd#0 standard input. That file contains boot-time system configuration. So that later on when the shell program starts, it will load inputs from that file and be able execute them automatically.
+
+Now is the exciting time: the `execve` call will replace the current running process to be `/bin/sh` and the shell program starts. How does the `execve` achieve that needs some explanations here.
