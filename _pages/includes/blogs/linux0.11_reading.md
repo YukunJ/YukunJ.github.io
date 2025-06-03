@@ -27,6 +27,7 @@ Table of Contents
   + [mount root file system](#mount_root)
   + [open terminal device file](#tty)
   + [the 2nd process](#second_process)
+  + [first page fault](#page_fault)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1423,4 +1424,37 @@ int do_execve(...) {
 }
 ```
 
-Thirdly, it prepares the `argv` and `envp` parameters for the new program to be loaded.
+Thirdly, it prepares the `argv` and `envp` parameters for the new program to be loaded. The explanations will be a bit loose here: On a high-level, the last **128KB** of each process' address space is for the parameter table. `execve` will copy the parameter to the right location so that the `/bin/sh` can start up properly.
+
+```c
+int do_execve(...) {
+  ...
+  unsigned long p = PAGE_SIZE * MAX_ARG_PAGES - 4;
+  ...
+  p = copy_strings(envc,envp,page,p,0);
+  ...
+  p = copy_strings(argc,argv,page,p,0);
+  ...
+  p += change_ldt(ex.a_text,page)-MAX_ARG_PAGES*PAGE_SIZE;
+  ...
+  p = (unsigned long) create_tables((char *)p,argc,envc);
+  ...
+  eip[0] = ex.a_entry;
+  eip[3] = p;
+}
+```
+
+Here `eip[0]` sets the instruction pointer register and `eip[3]` sets the stack pointer register. The reason being that, recall the assembly code we previously saw:
+
+```assembly
+EIP = 0x1C
+_sys_execve:
+  lea EIP(%esp),%eax
+  pushl %eax
+  call _do_execve
+  ...
+```
+
+It actually passes the address of current **EIP** as the first parameter into `execve`. Then in the `do_execve` we change it to the new program's desired EIP address. Since `sys_execve` is a system call, when the interrupt handler finishes, CPU will automatically recover the **EIP** and **ESP**, which essentially jumps to execute the new program `/bin/sh`.
+
+### page_fault
