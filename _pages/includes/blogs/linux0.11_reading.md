@@ -1365,3 +1365,62 @@ int sys_close(unsigned int fd) {
 And then it opens the `/etc/rc` file to be the fd#0 standard input. That file contains boot-time system configuration. So that later on when the shell program starts, it will load inputs from that file and be able execute them automatically.
 
 Now is the exciting time: the `execve` call will replace the current running process to be `/bin/sh` and the shell program starts. How does the `execve` achieve that needs some explanations here.
+
+```assembly
+_sys_execve:
+  lea EIP(%esp), %eax
+  pushl %eax
+  call _do_execve
+  addl $4, $esp
+  ret
+
+// fs/exec.c
+int do_execve(unsigned long * eip, long tmp, char * filename, char ** argv, char ** envp);
+
+// this is the exact calling instance in init() func
+static char * argv_rc[] = { "/bin/sh", NULL };
+static char * envp_rc[] = { "HOME=/", NULL };
+execve("/bin/sh", argv_rc, envp_rc);
+```
+
+The `execve` function is very long and we will analyze it part by part.
+
+Firstly, it reads the first **1KB** data from the binary file `/bin/sh`, and read it as `struct exec`. This format is rather old. Newer version of Linux adopts the **EIF** format.
+
+```c
+// a.out.h
+struct exec {
+  unsigned long a_info;
+  unsigned int a_text;
+  unsigned int a_data;
+  unsigned int a_bss;
+  unsigned int a_sysm;
+  unsigned int a_entry;
+  unsigned int a_trsize;
+  unsigned int  a_drsize;
+};
+
+int do_execve(...) {
+  ...
+  struct m_inode * inode = namei(filename);
+  struct buffer_head * bh = bread(inode->i_dev,inode->i_zone[0]);
+  ...
+  struct exec ex = *((struct exec *) bh->b_data); /* read exec-header */
+  ...
+}
+```
+
+Secondly, it has some logics to decide if the binary should be run as a script file. For example, we often see in the first line of the many scripts like `#!/bin/bash` or `#!/usr/bin/python`.
+
+```c
+int do_execve(...) {
+  ...
+  if ((bh->b_data[0] == '#') && (bh->b_data[1] == '!')) {
+    // find the interpreter and splice it in
+    ...
+  }
+  brelse(bh);
+}
+```
+
+Thirdly, it prepares the `argv` and `envp` parameters for the new program to be loaded.
