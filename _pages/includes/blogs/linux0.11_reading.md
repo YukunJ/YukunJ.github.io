@@ -1458,3 +1458,30 @@ _sys_execve:
 It actually passes the address of current **EIP** as the first parameter into `execve`. Then in the `do_execve` we change it to the new program's desired EIP address. Since `sys_execve` is a system call, when the interrupt handler finishes, CPU will automatically recover the **EIP** and **ESP**, which essentially jumps to execute the new program `/bin/sh`.
 
 ### page_fault
+
+Recall we only loaded the first **1KB** of the `/bin/bash` into memory so far. When we access some address that's not present in the memory, CPU will trigger a **page fault** with the last bit (presence bit) of the error code being **0**. Linux will enter the `do_no_page` handler eventually:
+
+```c
+// mm/memory.c
+// the code here is simplified, without some error handling branch
+void do_no_page(unsigned long error_code, unsigned long address) {
+  address &= 0xfffff000;
+  unsigned long tmp = address - current->start_code;
+  unsigned long page = get_free_page();
+  int block = 1 + tmp/BLOCK_SIZE;
+  int nr[4];
+  for (int i=0 ; i<4 ; block++,i++)
+    nr[i] = bmap(current->executable,block);
+  bread_page(page,current->executable->i_dev,nr);
+  ...
+  put_page(page,address);
+}
+```
+
+It first aligns the address to be the multipe of **4KB** page size, calculates the relative offset between the address and the beginning address of this processs to get the relative block index.
+
+And then it retrieves a free page from `mem_map[]`, read **4** blocks into this page since 1 block is of size **1KB**.
+
+Finally the `put_page` call will build the mapping between the physical memory page and the virtual linear memory address space for the process. 
+
+When the page fault exception handling is finished, CPU will try to access the address again. It will be successful this time since the mapping is already built in the page fault we just dealt with.
