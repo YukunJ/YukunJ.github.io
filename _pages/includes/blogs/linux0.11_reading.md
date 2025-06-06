@@ -28,6 +28,7 @@ Table of Contents
   + [open terminal device file](#tty)
   + [the 2nd process](#second_process)
   + [first page fault](#page_fault)
++ [Execution flow of a shell command](#shell_execution)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1485,3 +1486,44 @@ And then it retrieves a free page from `mem_map[]`, read **4** blocks into this 
 Finally the `put_page` call will build the mapping between the physical memory page and the virtual linear memory address space for the process. 
 
 When the page fault exception handling is finished, CPU will try to access the address again. It will be successful this time since the mapping is already built in the page fault we just dealt with.
+
+There are many shell programs available out there. We can take a quick look at **xv6** shell's code skeleton:
+
+```c
+// xv6-public sh.c simplified
+int main(void) {
+  static char buf[100];
+  while (getcmd(buf, sizeof(buf)) >= 0) {
+    if (fork() == 0)
+      runcmd(parsecmd(buf));
+    wait();
+  }
+}
+```
+
+Let's look back on the `init` function we've been looking at so far, which corresponds to a saying that the operating system is just an infinite loop driven by interrupts.
+
+```c
+// init/main.c
+void init(void) {
+  ...
+  // a big infinite loop, never exit
+  while (1) {
+    // a shell with tty0 terminal
+    if (!(pid=fork())) {
+      ...
+      (void) open("/dev/tty0",O_RDWR,0);
+      execve("/bin/sh",argv,envp);
+    }
+    // wait for this shell to finish
+    while (1)
+      if (pid == wait(&i))
+        break;
+  }
+}
+```
+
+In next section we will start to look at how the shell program interacts with user input and execute commands accordingly.
+
+
+## Shell_execution
