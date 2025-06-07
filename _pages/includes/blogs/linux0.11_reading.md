@@ -1527,3 +1527,18 @@ In next section we will start to look at how the shell program interacts with us
 
 
 ## Shell_execution
+
+Assume there is such a file `info.txt`,
+
+```bash
+name:flash
+age:28
+language:java
+```
+
+In this section, we will look at how the shell reads the command from keyboard, executes the command and prints out the result to the monitor.
+
+```
+$ cat info.txt | wc -l
+3
+```
