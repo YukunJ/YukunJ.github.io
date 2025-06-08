@@ -29,6 +29,7 @@ Table of Contents
   + [the 2nd process](#second_process)
   + [first page fault](#page_fault)
 + [Execution flow of a shell command](#shell_execution)
+  + [keyboard input](#keyboard_input)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1541,4 +1542,97 @@ In this section, we will look at how the shell reads the command from keyboard, 
 ```
 $ cat info.txt | wc -l
 3
+```
+
+### keyboard_input
+
+When we type the command `cat info.txt`, how does the OS know read such input and display it on the terminal screen? Let's take a look. 
+
+Recall in `con_init` we setup the interrupt handler for keyboard:
+
+```c
+// console.c
+void con_init(void) {
+  ...
+  set_trap_gate(0x21, &keyboard_interrupt);
+  ...
+}
+```
+
+When we click a key on the keyboard, it will trigger an interrupt and CPU will execute `keyboard_interrupt` accordingly.
+
+```asseembly
+// keyboard.s
+keyboard_interrupt:
+  ..
+  inb 0x60,%al
+  ...
+  call *key_table(,%eax,4)
+  ...
+  pushl $0
+  call do_tty_interrupt
+  ...
+```
+
+It reads **1** character from keyboard input from port `0x60`, calls the correspondingly processing function for it (for a regular character `c` it would just be `do_self`) and passes the ASCII code to `do_tty_interrupt`.
+
+```c
+// include/linux/tty.h
+#define TTY_BUF_SIZE 1024
+
+struct tty_queue {
+  unsigned long data;
+  unsigned long head;
+  unsigned long tail;
+  struct task_struct * proc_list;
+  char buf[TTY_BUF_SIZE];
+};
+
+struct tty_struct {
+  struct termios termios;
+  int pgrp;
+  int stopped;
+  void (*write)(struct tty_struct * tty);
+  struct tty_queue read_q;
+  struct tty_queue write_q;
+  struct tty_queue secondary;
+}
+
+// tty_io.c
+void do_tty_interrupt(int tty) {
+  copy_to_cooked(tty_table+tty);
+}
+
+void copy_to_cooked(struct tty_struct * tty) {
+  signed char c;
+  while (!EMPTY(tty->read_q) && !FULL(tty->secondary)) {
+    GETCH(tty->read_q, c);
+    ...
+    PUTCH(c,tty->secondary);
+  }
+  wake_up(&tty->secondary.proc_list);
+}
+```
+
+`tty_table` is the terminal device table. Here the **0** index refers to the terminal console. 
+
+Earlier when it calls the per-character processing function (`do_self` for `c` in this case), it puts the character read from keyboard into the `tty->read_q`. And in the `copy_to_cooked` function, it keeps reading out characters from the read queue and does some termios processing on it. Finally each "termios-cooked" character is put back into the secondary queue and it wakes up all the processes waiting on this secondary queue.
+
+After the character rests in `tty->read_q`, it will eventually be picked up by `tty_read` and get outputted to terminal console via `tty_write`.
+
+```c
+// tty_io.c
+int tty_read(unsigned channel, char * buf, int nr) {
+  ...
+  GETCH(tty->secondary,c);
+  ...
+}
+
+int tty_write(unsigned channel, char * buf, int nr) {
+  ...
+  PUTCH(c,tty->write_q);
+  ...
+  tty->write(tty);
+  ...
+}
 ```
