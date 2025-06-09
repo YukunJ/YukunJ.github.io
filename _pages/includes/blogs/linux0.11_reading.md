@@ -1623,9 +1623,24 @@ After the character rests in `tty->read_q`, it will eventually be picked up by `
 ```c
 // tty_io.c
 int tty_read(unsigned channel, char * buf, int nr) {
+  struct tty_struct * tty = &tty_table[channel];
+  char c, * b=buf;
+  while (nr>0) {
+    ...
+    if (EMPTY(tty->secondary) ...) {
+      sleep_if_empty(&tty->secondary);
+      continue;
+    }
+    do {
+      GETCH(tty->secondary,c);
+      ...
+      put_fs_byte(c,b++);
+      if (!--nr) break;
+    } while (nr>0 && !EMPTY(tty->secondary));
+    ...
+  }
   ...
-  GETCH(tty->secondary,c);
-  ...
+  return (b-buf);
 }
 
 int tty_write(unsigned channel, char * buf, int nr) {
@@ -1636,3 +1651,5 @@ int tty_write(unsigned channel, char * buf, int nr) {
   ...
 }
 ```
+
+Notice if there are more characters requested to be read, but currently there are not enough characters in the `tty->secondary` queue, the current process will be put to sleep via `sleep_if_empty()` until future wake up. We will look at process sleep and wake up pair in the next section.
