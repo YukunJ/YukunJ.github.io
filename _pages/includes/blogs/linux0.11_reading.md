@@ -30,6 +30,7 @@ Table of Contents
   + [first page fault](#page_fault)
 + [Execution flow of a shell command](#shell_execution)
   + [keyboard input](#keyboard_input)
+  + [process wake up and sleep](#wakeup_sleep)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1653,3 +1654,37 @@ int tty_write(unsigned channel, char * buf, int nr) {
 ```
 
 Notice if there are more characters requested to be read, but currently there are not enough characters in the `tty->secondary` queue, the current process will be put to sleep via `sleep_if_empty()` until future wake up. We will look at process sleep and wake up pair in the next section.
+
+### wakeup_sleep
+
+Recall earlier we discussed that there are 5 states a process could be in: `TASK_RUNNING`, `TASK_INTERRUPTIBLE`, `TASK_UNINTERRUPTIBLE`, `TASK_ZOMBIE` and `TASK_STOPPED`. The scheduler will only consider scheduling a process to run if it's in the `TASK_RUNNING` state.
+
+In the last section we saw that when more data than available are needed from `tty->secondary`, the process is put to sleep. In Linux, to put a process to sleep is as easy as change its state to be not in `TASK_RUNNING`, and to wake up a process is to change its state back to `TASK_RUNNING`.
+
+Let's look at the `sleep_on` and `wake_up` function pair that implement such functionality.
+
+```c
+// sched.c
+void sleep_on(struct task_struct **p) {
+  struct task_struct *tmp;
+  ...
+  tmp = *p;
+  *p = current;
+  current->state = TASK_UNINTERRUPTIBLE;
+  schedule();
+  if (tmp)
+    tmp->state=TASK_RUNNING;
+}
+
+void wake_up(struct task_struct **p) {
+  if (p && *p) {
+    (**p).state=TASK_RUNNING;
+  }
+}
+```
+
+Recall there is a `proc_list` field in the `tty_queue` and it gets passed into the `sleeo_on` call as parameter. The smart part here is that the `tmp` variable maintains a linked list of process waiting on this resource. 
+
+For example, when a second process entering the `sleep_on` for this resource, it will kept the first process in its `tmp` variable via `tmp = *p`. When it wakes up and continues execution passing the `schedule()` call, it will also set the `tmp->state` to be `TASK_RUNNING` so that essentially the first process could also be waken up. 
+
+This continues in a recursive manner until all the processes waiting on this resource are waken up to be `TASK_RUNNING` state.
