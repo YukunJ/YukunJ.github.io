@@ -31,6 +31,7 @@ Table of Contents
 + [Execution flow of a shell command](#shell_execution)
   + [keyboard input](#keyboard_input)
   + [process wake up and sleep](#wakeup_sleep)
+  + [how pipe works](#pipe)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1688,3 +1689,73 @@ Recall there is a `proc_list` field in the `tty_queue` and it gets passed into t
 For example, when a second process entering the `sleep_on` for this resource, it will kept the first process in its `tmp` variable via `tmp = *p`. When it wakes up and continues execution passing the `schedule()` call, it will also set the `tmp->state` to be `TASK_RUNNING` so that essentially the first process could also be waken up. 
 
 This continues in a recursive manner until all the processes waiting on this resource are waken up to be `TASK_RUNNING` state.
+
+### pipe
+
+The shell will parse the command and execute it according to its different execution type. `PIPE` is one of the types, corresponding to the `|` in our sample command `cat info.txt | wc -l`. On a high level `PIPE` redirects the left command's standard output to the right command's standard input.
+
+```c
+// xv6-public sh.c
+void runcmd(struct cmd *cmd) {
+  ...
+  int p[2];
+  ...
+  case PIPE:
+    pcmd = (struct pipecmd*)cmd;
+    pipe(p);
+    if (fork() == 0) {
+      close(1);
+      dup(p[1]);
+      close(p[0]);
+      close(p[1]);
+      runcmd(pcmd->left);
+    }
+    if (fork() == 0) {
+      close(0);
+      dup(p[0]);
+      close(p[0]);
+      close(p[1]);
+      runcmd(pcmd->right);
+    }
+    close(p[0]); 
+    close(p[1]);
+    wait(0);
+    wait(0);
+    break;
+    ...
+}
+```
+
+The `pipe` command will populate the `int p[2]` so that `p[0]` is for read and `p[1]` is for write. The left process will first close its original fd=1 (**stdout**) and duplicate the fd=1 to refer to `p[1]`. The right process will close its original fd=0 (**stdin**) and duplicate the fd=0 to refer to `p[0]`. The shell main process forks out such two process for themselves to interact with each other through pipe and wait for their completions eventually.
+
+Let's take a brief look at the underlying system call for `pipe` command:
+
+```c
+// fs/pipe.c
+int sys_pipe(unsigned long * fildes) {
+  struct m_inode * inode;
+  struct file * f[2];
+  int fd[2];
+  ...
+  // find the empty system open file slots and file descriptor table slots
+  ...
+  inode=get_pipe_inode();
+  f[0]->f_inode = f[1]->f_inode = inode;
+  f[0]->f_pos = f[1]->f_pos = 0;
+  f[0]->f_mode = 1; /* read */
+  f[1]->f_mode = 2; /* write */
+  put_fs_long(fd[0],0+fildes);
+  put_fs_long(fd[1],1+fildes);
+  return 0;
+}
+
+// inode.c
+struct m_inode * get_pipe_inode(void) {
+  struct m_inode *inode = get_empty_inode();
+  inode->i_size = get_free_page();
+  inode->i_count = 2; /* sum of readers/writer */
+  PIPE_HEAD(*inode) = PIPE_TAIL(*inode) = 0;
+  inode->i_pipe = 1;
+  return inode;
+}
+```
