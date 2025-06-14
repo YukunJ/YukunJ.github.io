@@ -5,7 +5,7 @@ excerpt: ""
 author_profile: false
 ---
 
-# Linux Source Reading
+# Linux 0.11 Source Reading
 
 Table of Contents
 + [Booting](#booting)
@@ -32,6 +32,8 @@ Table of Contents
   + [keyboard input](#keyboard_input)
   + [process wake up and sleep](#wakeup_sleep)
   + [how pipe works](#pipe)
+  + [signal mechanism](#signal)
++ [Conclusion](#conclusion)
 
 In this long blog, we will read over the source code for **Linux 0.11**, which is the first self-hosted version published in 1991 by Linus Torvalds.
 
@@ -1759,3 +1761,52 @@ struct m_inode * get_pipe_inode(void) {
   return inode;
 }
 ```
+
+### signal
+
+When the shell is executing a long running task and user clicks `Ctrl+C`, the task will be aborted and shell returns to the state that waits for user input.
+
+When user clicks `Ctrl+C`, the keyboard interrupt handler will get to the `copy_to_cooked` function, which will send this signal to all the processes with the same group number as current tty. The way to send the signal, as we will see in the following source code, is as simple as setting up the bit flag in the `struct task_struct`'s `signal` field.
+
+```c
+#define INTR_CHAR(tty) ((tty)->termios.c_cc[VINTR])
+
+// kernel/chr_drv/tty_io.c
+void copy_to_cooked(struct tty_struct *tty) {
+  ...
+  if (c == INTR_CHAR(tty)){
+    tty_instr(tty, INTMASK);
+  }
+  ...
+}
+
+void tty_intr(struct tty_struct * tty, int mask)
+{
+  int i;
+  ...
+  for (i = 0; i < NR_TASKS; i++) 
+    if (task[i] && task[i]->pgrp == tty->pgrp)
+      task[i]->signal |= mask;
+}
+```
+
+When the process returns back to user mode from a system call (say `timer_interrupt`) and there is any pending unblocked signal, it will call `do_signal`. When the handler for this signal is empty, it will directly exit the process. Otherwise, it will set the `eip` instruction register to the handler and jump there to handle this signal accordingly.
+
+```c
+// kernel/signal.c
+void do_signal(long signr ...) {
+  ...
+  struct sigaction *sa = current->sigaction + signr - 1;
+  sa_handler = (unsigned long) sa->sa_handler;
+  if (!sa_handler) {
+    ...
+    do_exit(1 << (signr - 1));
+    ...
+  }
+  *(&eip) = sa_handler;
+}
+```
+
+## Conclusion
+
+In this post we walk through some aspects of the **Linux 0.11** source code. Wish you like it!
