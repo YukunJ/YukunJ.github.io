@@ -6,6 +6,8 @@
 
 ### Operating System
 
++ [Double mmap Virtual Memory Trick](/blogs/double_mmap_trick)
+
 + [TLB & Huge Page](/blogs/tlb_hugepage)
 
 + [Linux 0.11 Source Reading](/blogs/linux_source_reading)
