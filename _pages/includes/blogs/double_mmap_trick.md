@@ -75,3 +75,7 @@ void enqueue(struct circular_queue *queue, char *data, size_t len) {
 ```
 
 To keep this blog concise, I’m skipping detailed performance benchmarks for the double-mmap technique. Curious readers are encouraged to experiment — under frequent wrap-around conditions, it can deliver a noticeable performance boost.
+
+**Reference**
+
++ [Super Fast Circular Ring Buffer Using Virtual Memory trick](https://abhinavag.medium.com/a-fast-circular-ring-buffer-4d102ef4d4a3)
