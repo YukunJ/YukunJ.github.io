@@ -15,7 +15,7 @@ It has the following constraints:
 + the items are presented in a streaming fashion and the algorithm cannot look back
 + at any point, the algorithm needs to be able to present a random sample of size ***k*** based on the data it processes so far
 
-We will first introduce a basic **Algorithm R** by Jeffrey Vitter and then see an optimized version of it named **Algorithm L**.
+We will introduce a basic **Algorithm R** by Jeffrey Vitter.
 
 <img src="/images/blogs/reservoir.png" alt="media 1" width="300">
 
@@ -37,8 +37,7 @@ We will prove that during the processing of each element, after processing $i$ e
 
 Assume the average time complexity to generate a random number is $O(1)$, this basic algorithm R has an asymptotic complexity of $O(n)$.
 
-**Algorithm L**
-
+Notice there is an optimized version of this called Algorithm L, which runs in $O(k(1+\log(\frac{n}{k})))$ by only computing three random numbers for each item that becomes part of the reservoir. Interested readers could further look it up.
 
 **Reference**
 
