@@ -15,3 +15,7 @@
 ### Algorithm
 
 + [Reservoir Random Sampling](/blogs/reservoir_sampling)
+
+### Performance Engineering
+
++ [Top-down Microarchitecture Analysis](/blogs/tma)
