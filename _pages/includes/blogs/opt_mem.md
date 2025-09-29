@@ -7,7 +7,7 @@ author_profile: false
 
 # Optimize Memory Access
 
-Modern computers' memory operations account for the largest portion of performance bottlenecks and power consumptions. In this section we look at a few advices on how to optimize the program when TMA shows `Memory Bound`.
+Modern computers' memory operations account for the largest portion of performance bottlenecks and power consumptions. In this section we look at a few advices on how to optimize the program when TMA shows `Memory Bound`. Meanwhile, remember that there is always a viable option to buy better hardware: invest in a server with more memory channels or DRAM modules with faster transfer speed.
 
 ## Cache-Friendly Data Structures
 
@@ -87,3 +87,15 @@ struct S {
     unsigned speed;   // marching
 }
 ```
+
+**Dynamic Memory Allocation**
+
+Dynamic memory allocation has quite a few associated costs: 
+
++ it might need OS to perform a system call
++ in multi-threaded applications, dynamic memory allocation might need synchronization
++ *demand-paging* might incur a cost of page fault for every newly allocated memory page when accessed.
+
+People have come up with different solutions to these issues. One way is to design a user-space memory allocation library that requests a big chunk of heap space from OS and conducts allocation and deallocation in user-space by the library itself. Examples include **jemalloc**, **tcmalloc**, etc.
+
+In realtime-senstitive applications like embedded system or high-frequency-trading, people usually statically allocated all the needed space at the very beginning of the program and only deallocate them by the end of the running program. It requires to know how much space the application would need and reuse space in an efficient manner.  
