@@ -18,5 +18,4 @@
 
 ### Performance Engineering
 
-+ [Top-down Microarchitecture Analysis](/blogs/tma)
-+ [Optimize Memory Access](/blogs/opt_mem)
++ [Top-down Microarchitecture Analysis & Optimization](/blogs/tma)
