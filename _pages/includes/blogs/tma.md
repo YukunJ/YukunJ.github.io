@@ -359,3 +359,36 @@ for (int i = 0; i+1 < N; i += 2) {
 diffs = diffs1 + diffs2;
 ```
 
+**Vectorization**
+
+A lot of time vectorization happens automatically without any user intervention, generating fast SIMD code for a wide variety of programs. The auto-vectorization usually involves three steps:
+
++ Legality check
++ Profitability check
++ Transformation
+
+There are a few common cases where people run into that prevent vectorizations.
+
+**Vectorization is Illegal**
+
+Hard limit like read-after-write dependence prevents vectorizations:
+
+```c
+void vectorDependence(int *A, int n) {
+    for (int i = 0; i < n; i++) {
+        A[i] = A[i-1] * 2;
+    }
+}
+```
+
+Soft limit like floating-point arthimetic by default is not considered "associative" by compiler. If you can tolerate a bit of variation, `-ffast-math` is the right compiler flag to use globally or use `#ppragma clang fp reassociate(on)` in front of particular loops.
+
+**Vectorization is not Beneficial**
+
+Compiler internally has a cost model that tradeoff if a place is worth vectorization. Sometimes the answer is No. Vector instructions could lead to frequency downclocking or startup overhead. 
+
+**Loop Vectorized but Scalar Version Used**
+
+If the generated code assume loop trip count higher than what the program uses. For example, the compiler generates the vectorized code to process 64 elements at a time, but the input array during execution always has less than 64 elements, then the scalar version of the code is executed instead. Programmers may explicitly use `#pragma clang loop vectorize_width(N)` to tackle this.
+
+Lastly, vectorization is not a pure-all. Sometimes the scalar version of the code outperforms the vectorized version. So always measure before hands on manual vectorization solutions.
