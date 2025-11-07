@@ -392,3 +392,85 @@ Compiler internally has a cost model that tradeoff if a place is worth vectoriza
 If the generated code assume loop trip count higher than what the program uses. For example, the compiler generates the vectorized code to process 64 elements at a time, but the input array during execution always has less than 64 elements, then the scalar version of the code is executed instead. Programmers may explicitly use `#pragma clang loop vectorize_width(N)` to tackle this.
 
 Lastly, vectorization is not a pure-all. Sometimes the scalar version of the code outperforms the vectorized version. So always measure before hands on manual vectorization solutions.
+
+# Optimize Branch Prediction
+
+Mispredicting a branch can add significant penalty in CPU when it happens frequently. Typically on modern CPUs it amounts to a 10 to 25 cycles penalty. Branch predictors use caches and history registers to store dynamic branch history. Therefore it is susceptible to:
+
++ Cold misses: when no dynamic history is available
++ Capacity misses: loss of dynamic history due to a very high number of branches in program
++ Conflict misses: branches mapped into same cache bucket (associative sets)
+
+It's normal for a general purpose application to have a 5% to 10% Bad Speculation metric. Once it rises above 10% we should pay more attention to it. There are several ways programmers could explicitly optimize for branch prediction.
+
+**Replace Branches with Lookup**
+
+One way to avoid frequently mispredicted branches is to use lookup table. For example,
+
+```c
+// before
+int8_t mapToBucket(unsigned v) {
+    if (v < 10) return 0;
+    else if (v < 20) return 1;
+    else if (v < 30) return 2;
+    else if (v < 40) return 3;
+    else if (v < 50) return 4;
+    return -1;
+}
+
+// after
+int8_t buckets[50] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+};
+
+int8_t mapToBucket(unsigned v) {
+    if (v < sizeof(buckets) / sizeof(int8_t))
+        return buckets[v];
+    return -1;
+}
+```
+
+For the improved version of `mapToBucket`, the compiler will likely generate a single branch instruction that guards against out-of-bound access to the `buckets` array, instead of having many branches as in the original version.
+
+**Replace Branches with Arithmetic**
+
+Same function `mapToBucket` we can write it using arithemtic:
+
+```c++
+int8_t mapToBucket(unsigned v) {
+    constexpr unsigned BucketRangeMax = 50;
+    if (v < BucketRangeMax) {
+        return v / 10;
+    }
+    return -1;
+}
+```
+
+**Replace Branches with Selection**
+
+Some branches could be effectively eliminated by executing both parts of the branch and then selecting the right result. If the branch functions are small and the compiler can inline them, then selection might bring noticeable performance benefits. If the functions are big and expensive to compute, then it might be actually cheaper to take the cost of a potential branch mispredict.
+
+```c++
+// before
+int a;
+if (cond) {
+    a = computeX();
+} else {
+    a = computeY();
+}
+foo(a);
+
+// branch selection
+int x = computeX();
+int y = computeY();
+int a = (cond) ? x : y;
+foo(a);
+```
+
+**Multiple Tests Single Branch**
+
+The main idea here is to avoid executing a branch for every element of a large array. Instead, the goal is to perform multiple tests simultaneously, which primarily involves using **SIMD** instructions. 
