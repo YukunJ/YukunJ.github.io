@@ -474,3 +474,29 @@ foo(a);
 **Multiple Tests Single Branch**
 
 The main idea here is to avoid executing a branch for every element of a large array. Instead, the goal is to perform multiple tests simultaneously, which primarily involves using **SIMD** instructions. 
+
+# Optimize Machine Code Layout
+
+As the new processors get more computation power, the CPU Fronend (FE) needs to fetching and decoding instructions fast enough to deliver to the Backend, otherwise the overall performance suffer. In the **TMA** methodology, below 10% Frontend Bound metric is normal for typical application. If it's more than 20%, it is worth investigation.
+
+A ***basic block*** is a sequence of instructions with a single entry and a single exit. This is an imporatn property leveraged by many compiler transformations because it reduces the problem of control flow graph analysis and transformation. 
+
+**Basic Block Placement**
+
+Compiler can transform the basic block placement so that it maintains fallthrough hot code path and move away the cold path. It's beneficial because not-taken branches are cheaper and it achieves better instruction cache utilization.
+
+**Basic Block Alignment**
+
+Compiler will insert/shift hot code using NOPs instructions to pad them within one cacheline if possible. This is particular useful for hot loops to achieve better instruction cache utilization.
+
+**Function Splitting**
+
+Compiler can split cold blocks of code and place them into separate functions. This makes the original code path "smaller": the cold function body is replaced by a jump instruction that's rarely executed. This is helpful for functions with complex CFG when there are big blocks of cold code between hot parts.
+
+**Function Reorder**
+
+Linker could group hot functions together to achieve better cache utilization. This is helpful when there are many small hot functions.
+
+**Profile Guided Optimization**
+
+Compiler could have generated more efficient/tailored code if it knows more about the typical use cases of the application. This is when profiling information comes handy. By providing particular flags (for example `-fprofile-instr-generate`) to compiler, it can first generate instrumented binary and run to produce profile data. Then the compiler could recompile the binary using the profile data as a prior guide. 
