@@ -6,7 +6,7 @@
 
 ### Computer System
 
-+ [PIM-SM Multicast Protocol (WIP)](/blogs/multicast)
++ [PIM-SM Multicast Protocol](/blogs/multicast)
 
 + [Double mmap Virtual Memory Trick](/blogs/double_mmap_trick)
 

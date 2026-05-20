@@ -53,15 +53,81 @@ In this way, the first-hop router stays informed about the latest multicast grou
 
 ### Routing
 
-Now we will talk about how each router learns how and where to route a multicast packet from source to a group of destination in **PIM-SM**. It has 2 phases: rendezvous point routing and SPT switch over.
+Now we will talk about how each router learns how and where to route a multicast packet from source to a group of destination in **PIM-SM**. It has 2 phases: rendezvous point (RP) routing and SPT switch over.
+
+Rendezvous point (RP) act like a temporary meeting place between multicast sources and multicast receivers. So the router first establishes a shared multicast tree rooted at RP before building and switching to a shortest-path tree directly towards the source.
+
+We will use the following topology example for illustration:
+
++ multicast group **G** = `239.1.1.1`
++ `H1` and `H2` are interested in joining **G** while H3 is not
+
+<img src="/images/blogs/base_topology.png" alt="base_topology" width="300">
+
+
+#### Join the Group
+
+First, hosts interested in **G** inform the first-hop routers using **IGMP**:
+
+```shell
+H1 -> R1: "I want traffic for G"
+H2 -> R1: "I want traffic for G"
+```
 
 #### Rendezvous Point Routing
 
+RP is pre-chosen during bootstrap time or manually configured. First hop routers send multicast join messages toward the RP:
+
+```shell
+R1 -> RP: JOIN(*, G)
+```
+
+The notatio `(*, G)` means traffic from ANY source to multicast group G.
+
+At this point, say the source send a multicast message to the group G, the traffic flow will follow
+
+```
+                 /→ H1
+Source → RP → R1
+                 \→ H2
+```
+
+<img src="/images/blogs/rp_topology.png" alt="base_topology" width="300">
+
+Notice the detour to RP is actually wasted work since Source is directly connected with R1.
+
+
 #### SPT Switch Over
 
+After the multicast traffic starts flowing, router may decide to switch from a shared RP tree to shorest-path tree (SPT) rooted directly at the source.
+
+Router `R1` realizes `Source -> R1` is shortest than `Source -> RP -> R1` so it sends a source-specific multicast join toward the source
+
+```shell
+R1 -> Source: JOIN(S, G)
+```
+
+After this switch over, the traffic flow becomes
+
+```
+            /→ H1
+Source → R1
+            \→ H2
+```
+
+<img src="/images/blogs/stp_topology.png" alt="base_topology" width="300">
+
+Notice the packet is only transmitted once through the link `Source -> R1` and only replicated at the last layer at `R1` before branching out to `H1` and `H2`. And this replication could be done by optimzied hardware ASIC instead of software in the router to achieve further latency optimization.
+
+## Conclusion
+
+Multicast provides an efficient way to distribute the same data stream to multiple receivers without duplicating traffic at the source. Instead of pushing **N** identical unicast streams, the network builds a shared distribution tree and replicates packets only where paths diverge.
+
+In practice, multicast trades off simplicity at the application level for complexity in the network layer — but for systems like market data distribution where latency and bandwidth efficiency matter, this trade-off is worth it.
+
 ## Reference
-1. Berkeley CS 168 Textbook (https://textbook.cs168.io/beyond-client-server/intro.html)
+1. [Berkeley CS 168 Textbook](https://textbook.cs168.io/beyond-client-server/intro.html)
 
-2. IGMP protocol (https://en.wikipedia.org/wiki/Internet_Group_Management_Protocol)
+2. [IGMP protocol](https://en.wikipedia.org/wiki/Internet_Group_Management_Protocol)
 
-3. PIM-SM sparse mode (https://ccnp-sp.gitbook.io/studyguide/routing/multicast/pim-sm-sparse-mode)
+3. [PIM-SM sparse mode](https://ccnp-sp.gitbook.io/studyguide/routing/multicast/pim-sm-sparse-mode)
